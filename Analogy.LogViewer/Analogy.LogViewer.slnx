@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="analogy.logviewer.client/analogy.logviewer.client.esproj">
+    <Build />
+    <Deploy />
+  </Project>
+  <Project Path="Analogy.LogViewer.Server/Analogy.LogViewer.Server.csproj" />
+</Solution>
