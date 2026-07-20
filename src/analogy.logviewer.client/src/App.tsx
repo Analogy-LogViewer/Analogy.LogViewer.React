@@ -9,6 +9,10 @@ import { ecsLogger } from "./services/ecsLogger";
 import { ErrorToast } from "./components/ErrorToast";
 import './App.css';
 
+const PAGE_STORAGE_KEY = "app_last_page";
+const PAGES = ["main", "settings", "information", "snapshots", "debugging", "patients", "sessionSummaries", "applicationLogs"] as const;
+type Page = typeof PAGES[number];
+
 const initializeApp = async () => {
     await connectToSignalR();
 };
@@ -93,10 +97,10 @@ function ExternalWindow({ title, children, onClose, windowRef }: { title: string
 
 function App() {
 
-    const [page, setPage] = useState<"main" | "settings" | "information" | "snapshots" | "debugging" | "patients" | "sessionSummaries" | "applicationLogs">("main");
+    const [page, setPage] = useState<Page>("main");
     const [isLeftFlyPanelOpen, setIsLeftFlyPanelOpen] = useState<boolean>(false);
     const isRunningInWebView2 = Boolean((window as unknown as { chrome?: { webview?: unknown } }).chrome?.webview);
-    const pathToPage = (pathname: string): typeof page => {
+    const pathToPage = (pathname: string): Page => {
         const normalized = pathname.replace(/\/+$/, "");
         if (normalized === "" || normalized === "/") {
             return "main";
@@ -125,14 +129,14 @@ function App() {
         return "main";
     };
 
-    const pageToPath = (nextPage: typeof page): string => {
+    const pageToPath = (nextPage: Page): string => {
         if (nextPage === "settings") return "/settings";
         if (nextPage === "information") return "/information";
         if (nextPage === "applicationLogs") return "/application-logs";
         return "/";
     };
 
-    const navigate = (nextPage: typeof page) => {
+    const navigate = (nextPage: Page) => {
         setPage(nextPage);
         const nextPath = pageToPath(nextPage);
         if (window.location.pathname !== nextPath) {
@@ -141,7 +145,26 @@ function App() {
     };
 
     useEffect(() => {
-        navigate(pathToPage(window.location.pathname));
+        try {
+            localStorage.setItem(PAGE_STORAGE_KEY, page);
+        } catch {
+            // ignore storage errors
+        }
+    }, [page]);
+
+    useEffect(() => {
+        let initialPage = pathToPage(window.location.pathname);
+        if (initialPage === "main") {
+            try {
+                const saved = localStorage.getItem(PAGE_STORAGE_KEY);
+                if (saved && (PAGES as readonly string[]).includes(saved)) {
+                    initialPage = saved as Page;
+                }
+            } catch {
+                // ignore storage errors
+            }
+        }
+        navigate(initialPage);
 
         const onPopState = () => {
             setPage(pathToPage(window.location.pathname));

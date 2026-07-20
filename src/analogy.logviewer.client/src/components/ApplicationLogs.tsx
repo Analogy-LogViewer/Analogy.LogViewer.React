@@ -3,6 +3,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { ANALOGY_LOG_LEVEL, type AnalogyLogLevel, type AnalogyLogMessage } from "../types/analogyLogMessage";
 
 const DEFAULT_LOG_PATH = "C:\\MVD2\\Logs\\ECS\\";
+const FILE_PATH_STORAGE_KEY = "appLogs_filePath";
+const FILE_TYPE_STORAGE_KEY = "appLogs_logFileType";
 
 type Props = {
     onBack: () => void;
@@ -10,6 +12,7 @@ type Props = {
 
 type SortKey = "date" | "processId" | "text" | "level" | "module" | "source" | "user" | "threadId" | "machineName" | "rawText" | "lineNumber";
 type SortDir = "asc" | "desc";
+type LogFileType = "Ecs" | "Serilog";
 
 const COLUMNS: { key: SortKey; label: string; width: number; mono?: boolean }[] = [
     { key: "date",        label: "Date",          width: 172 },
@@ -337,20 +340,33 @@ interface LogTab {
     id: string;
     label: string;
     filePath: string;
-    logFileType: "Ecs" | "HawkEye" | "LighthouseEvents" | "LighthouseTraces";
+    logFileType: LogFileType;
     logs: AnalogyLogMessage[];
     loadedAt: string;
     error: string;
 }
 
 const FILE_TYPE_LABELS: Record<string, string> = {
-    Ecs: "ECS Format", HawkEye: "Hawk Eye",
-    LighthouseEvents: "Lighthouse Events", LighthouseTraces: "Lighthouse Traces",
+    Ecs: "ECS Format",
+    Serilog: "Serilog",
 };
 
 export function ApplicationLogs({ onBack }: Props) {
-    const [filePath, setFilePath] = useState(DEFAULT_LOG_PATH);
-    const [logFileType, setLogFileType] = useState<"Ecs" | "HawkEye" | "LighthouseEvents" | "LighthouseTraces">("Ecs");
+    const [filePath, setFilePath] = useState(() => {
+        try {
+            return localStorage.getItem(FILE_PATH_STORAGE_KEY) ?? DEFAULT_LOG_PATH;
+        } catch {
+            return DEFAULT_LOG_PATH;
+        }
+    });
+    const [logFileType, setLogFileType] = useState<LogFileType>(() => {
+        try {
+            const saved = localStorage.getItem(FILE_TYPE_STORAGE_KEY);
+            return saved === "Serilog" ? "Serilog" : "Ecs";
+        } catch {
+            return "Ecs";
+        }
+    });
     const [tabs, setTabs] = useState<LogTab[]>([]);
     const [activeTabId, setActiveTabId] = useState<string | null>(null);
     const tabCounterRef = useRef(0);
@@ -396,6 +412,22 @@ export function ApplicationLogs({ onBack }: Props) {
     const [inlineJsonViewer, setInlineJsonViewer] = useState(false);
     const [isFullView, setIsFullView] = useState(false);
     const [saveDropdownOpen, setSaveDropdownOpen] = useState(false);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(FILE_PATH_STORAGE_KEY, filePath);
+        } catch {
+            // ignore storage errors
+        }
+    }, [filePath]);
+
+    useEffect(() => {
+        try {
+            localStorage.setItem(FILE_TYPE_STORAGE_KEY, logFileType);
+        } catch {
+            // ignore storage errors
+        }
+    }, [logFileType]);
 
     const handleFilePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -795,8 +827,8 @@ export function ApplicationLogs({ onBack }: Props) {
                     </button>
                 </div>
                 <div style={{ display: "flex", gap: 16, marginTop: 5, alignItems: "center" }}>
-                    {(["Ecs", "HawkEye", "LighthouseEvents", "LighthouseTraces"] as const).map((t, i) => {
-                        const labels = ["ECS Format", "Hawk Eye", "Lighthouse Events", "Lighthouse Traces"];
+                    {(["Ecs", "Serilog"] as const).map((t, i) => {
+                        const labels = ["ECS Format", "Serilog"];
                         return (
                             <label key={t} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer", userSelect: "none" }}>
                                 <input type="radio" name="logFileType" value={t} checked={logFileType === t}
