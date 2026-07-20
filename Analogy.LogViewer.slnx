@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".github/workflows/dotnet-core-desktop.yml" />
+  </Folder>
   <Project Path="src/analogy.logviewer.client/analogy.logviewer.client.esproj">
     <Build />
     <Deploy />
