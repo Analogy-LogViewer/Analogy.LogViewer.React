@@ -14,7 +14,7 @@ namespace Analogy.LogViewer.Server.Types
         public string AnalogyOrganizationName => "Analogy-LogViewer";
         public string AnalogyRepositoryName => "Analogy.LogViewer";
         private ILogger Logger { get; set; }
-        public AnalogyNonPersistSettings(ILogger logger)
+        public AnalogyNonPersistSettings(ILogger<AnalogyNonPersistSettings> logger)
         {
             Logger = logger;
             AdditionalAssembliesDependenciesLocations = new List<string>();

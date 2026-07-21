@@ -12,7 +12,7 @@ namespace Analogy.LogViewer.Server.Types
         AnalogyNonPersistSettings analogyNonPersistSettings,
         IAnalogyFoldersAccess foldersAccess,
         NotificationManager notificationManager,
-        ILogger logger)
+        ILogger<FactoriesManager> logger)
         : IFactoriesManager
     {
         public List<string> ProbingPaths { get; set; } = new List<string>();
