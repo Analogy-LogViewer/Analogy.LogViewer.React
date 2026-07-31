@@ -1,7 +1,6 @@
 ﻿using Analogy.Interfaces;
 using Analogy.Interfaces.DataTypes;
-using Analogy.LogViewer.ElasticCommonSchema.IAnalogy;
-using Analogy.LogViewer.Serilog.IAnalogy;
+using Analogy.LogViewer.Server.Interfaces;
 using Analogy.LogViewer.Server.Types;
 using Microsoft.AspNetCore.Mvc;
 
@@ -11,39 +10,66 @@ namespace Analogy.LogViewer.Server.Controllers
     [Route("api/[controller]")]
     public class LoggingController : ControllerBase
     {
-        public LoggingController()
+        public sealed record DataProviderDto(Guid Id, string Title);
+        public sealed record DataProvidersFactoryDto(Guid FactoryId, string Title, IEnumerable<DataProviderDto> DataProviders);
+
+        [HttpGet]
+        [Route("GetProviders")]
+        public IEnumerable<DataProvidersFactoryDto> GetProviders([FromServices] IFactoriesManager factoriesManager)
         {
+            foreach (var fc in factoriesManager.Factories)
+            {
+                foreach (var dfc in fc.DataProvidersFactories)
+                {
+                    var providers = new List<DataProviderDto>();
+                    foreach (var dataProvider in dfc.DataProviders)
+                    {
+                        providers.Add(new DataProviderDto(
+                            dataProvider.Id,
+                            string.IsNullOrWhiteSpace(dataProvider.OptionalTitle) ? dataProvider.Id.ToString() : dataProvider.OptionalTitle));
+                    }
+
+                    yield return new DataProvidersFactoryDto(dfc.FactoryId, dfc.Title, providers);
+                }
+            }
         }
         [HttpGet]
         [Route("GetLog")]
-        public async Task<ActionResult<List<IAnalogyLogMessage>>> GetLog([FromQuery] string? filePath = null, [FromQuery] LogFileType logFileType = LogFileType.Ecs)
+        public async Task<ActionResult<List<IAnalogyLogMessage>>> GetLog(
+            [FromQuery] string? filePath = null,
+            [FromQuery] Guid? dataProviderId = null,
+            [FromServices] IFactoriesManager? factoriesManager = null)
         {
             if (!System.IO.File.Exists(filePath))
             {
                 return BadRequest($"File not found: {filePath}");
             }
+            if (dataProviderId is null || dataProviderId == Guid.Empty)
+            {
+                return BadRequest("A valid data provider id is required.");
+            }
+            if (factoriesManager is null)
+            {
+                return BadRequest("Factories manager is not available.");
+            }
+
             try
             {
                 await Task.Yield();
-                switch (logFileType)
+                var dataProvider = factoriesManager.GetAllOfflineDataSources(new[] { dataProviderId.Value }).FirstOrDefault();
+                if (dataProvider is null)
                 {
-                    case LogFileType.Ecs:
-                        var p = new EcsOfflineDataProvider();
-                        var msg = await p.Process(filePath, HttpContext.RequestAborted, new MessageHandler());
-                        return Ok(msg);
-                    case LogFileType.Serilog:
-                        var serilog = new SerilogOfflineDataProvider();
-                        var serilogMessages = await serilog.Process(filePath, HttpContext.RequestAborted, new MessageHandler());
-                        return Ok(serilogMessages);
+                    return BadRequest($"Provider not found for id: {dataProviderId}");
                 }
 
-                return Ok(new List<IAnalogyLogMessage>());
+                await factoriesManager.InitializeIfNeeded(dataProvider);
+                var messages = await dataProvider.Process(filePath, HttpContext.RequestAborted, new MessageHandler());
+                return Ok(messages);
             }
             catch (Exception e)
             {
                 return BadRequest($"Error reading file {filePath}:{e.Message}");
             }
-            return BadRequest($"Log file type '{logFileType}' is not yet supported.");
         }
     }
 

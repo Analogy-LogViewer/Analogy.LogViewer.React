@@ -4,15 +4,16 @@ import { ANALOGY_LOG_LEVEL, type AnalogyLogLevel, type AnalogyLogMessage } from 
 
 const DEFAULT_LOG_PATH = "C:\\MVD2\\Logs\\ECS\\";
 const FILE_PATH_STORAGE_KEY = "appLogs_filePath";
-const FILE_TYPE_STORAGE_KEY = "appLogs_logFileType";
 
 type Props = {
     onBack: () => void;
+    selectedFactoryTitle: string;
+    selectedProviderId: string;
+    selectedProviderTitle: string;
 };
 
 type SortKey = "date" | "processId" | "text" | "level" | "module" | "source" | "user" | "threadId" | "machineName" | "rawText" | "lineNumber";
 type SortDir = "asc" | "desc";
-type LogFileType = "Ecs" | "Serilog";
 
 const COLUMNS: { key: SortKey; label: string; width: number; mono?: boolean }[] = [
     { key: "date",        label: "Date",          width: 172 },
@@ -340,31 +341,20 @@ interface LogTab {
     id: string;
     label: string;
     filePath: string;
-    logFileType: LogFileType;
+    providerId: string;
+    providerTitle: string;
+    factoryTitle: string;
     logs: AnalogyLogMessage[];
     loadedAt: string;
     error: string;
 }
 
-const FILE_TYPE_LABELS: Record<string, string> = {
-    Ecs: "ECS Format",
-    Serilog: "Serilog",
-};
-
-export function ApplicationLogs({ onBack }: Props) {
+export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProviderId, selectedProviderTitle }: Props) {
     const [filePath, setFilePath] = useState(() => {
         try {
             return localStorage.getItem(FILE_PATH_STORAGE_KEY) ?? DEFAULT_LOG_PATH;
         } catch {
             return DEFAULT_LOG_PATH;
-        }
-    });
-    const [logFileType, setLogFileType] = useState<LogFileType>(() => {
-        try {
-            const saved = localStorage.getItem(FILE_TYPE_STORAGE_KEY);
-            return saved === "Serilog" ? "Serilog" : "Ecs";
-        } catch {
-            return "Ecs";
         }
     });
     const [tabs, setTabs] = useState<LogTab[]>([]);
@@ -421,14 +411,6 @@ export function ApplicationLogs({ onBack }: Props) {
         }
     }, [filePath]);
 
-    useEffect(() => {
-        try {
-            localStorage.setItem(FILE_TYPE_STORAGE_KEY, logFileType);
-        } catch {
-            // ignore storage errors
-        }
-    }, [logFileType]);
-
     const handleFilePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -455,6 +437,10 @@ export function ApplicationLogs({ onBack }: Props) {
             setLoadError("Enter a file path first.");
             return;
         }
+        if (!selectedProviderId) {
+            setLoadError("Select a data provider from the main page first.");
+            return;
+        }
         setLoadError("");
         setLoading(true);
         if (clearOldTabs) {
@@ -465,9 +451,11 @@ export function ApplicationLogs({ onBack }: Props) {
         const newId = `tab-${tabCounterRef.current}-${Date.now()}`;
         const newTab: LogTab = {
             id: newId,
-            label: `Offline log #${tabCounterRef.current} (${FILE_TYPE_LABELS[logFileType]})`,
+            label: `Offline log #${tabCounterRef.current} (${selectedProviderTitle || selectedProviderId})`,
             filePath: path,
-            logFileType,
+            providerId: selectedProviderId,
+            providerTitle: selectedProviderTitle,
+            factoryTitle: selectedFactoryTitle,
             logs: [],
             loadedAt: "",
             error: "",
@@ -476,7 +464,7 @@ export function ApplicationLogs({ onBack }: Props) {
         setActiveTabId(newId);
         setSelectedIdx(null);
         try {
-            const params = new URLSearchParams({ filePath: path, logFileType });
+            const params = new URLSearchParams({ filePath: path, dataProviderId: selectedProviderId });
             const res = await fetch(`/api/Logging/GetLog?${params.toString()}`, { method: "GET" });
             if (!res.ok) {
                 const text = await res.text().catch(() => "");
@@ -542,9 +530,9 @@ export function ApplicationLogs({ onBack }: Props) {
         setLoading(true);
         const tabId = activeTab.id;
         const tabPath = activeTab.filePath;
-        const tabType = activeTab.logFileType;
+        const providerId = activeTab.providerId;
         try {
-            const params = new URLSearchParams({ filePath: tabPath, logFileType: tabType });
+            const params = new URLSearchParams({ filePath: tabPath, dataProviderId: providerId });
             const res = await fetch(`/api/Logging/GetLog?${params.toString()}`, { method: "GET" });
             if (!res.ok) {
                 const text = await res.text().catch(() => "");
@@ -728,6 +716,11 @@ export function ApplicationLogs({ onBack }: Props) {
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
                 <button type="button" style={btnStyle} onClick={onBack}>← Back</button>
                 <span style={{ fontWeight: 700, fontSize: 16 }}>Application Logs</span>
+                {selectedProviderId && (
+                    <span style={{ color: "var(--app-muted-text)", fontSize: 12 }}>
+                        {selectedFactoryTitle} / {selectedProviderTitle || selectedProviderId}
+                    </span>
+                )}
                 {activeTab && !loading && !activeTab.error && (
                     <span style={{ color: "var(--app-muted-text)", fontSize: 12 }}>
                         {filtered.length !== logs.length
@@ -800,7 +793,7 @@ export function ApplicationLogs({ onBack }: Props) {
                     <button
                         type="button"
                         onClick={() => void loadLogs()}
-                        disabled={loading}
+                        disabled={loading || !selectedProviderId}
                         style={{
                             height: 26,
                             padding: "0 14px",
@@ -811,7 +804,7 @@ export function ApplicationLogs({ onBack }: Props) {
                             cursor: loading ? "default" : "pointer",
                             fontSize: 12,
                             fontWeight: 600,
-                            opacity: loading ? 0.7 : 1,
+                            opacity: loading || !selectedProviderId ? 0.7 : 1,
                             display: "inline-flex",
                             alignItems: "center",
                             gap: 6,
@@ -827,16 +820,9 @@ export function ApplicationLogs({ onBack }: Props) {
                     </button>
                 </div>
                 <div style={{ display: "flex", gap: 16, marginTop: 5, alignItems: "center" }}>
-                    {(["Ecs", "Serilog"] as const).map((t, i) => {
-                        const labels = ["ECS Format", "Serilog"];
-                        return (
-                            <label key={t} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer", userSelect: "none" }}>
-                                <input type="radio" name="logFileType" value={t} checked={logFileType === t}
-                                    onChange={() => setLogFileType(t)} style={{ margin: 0, cursor: "pointer" }} />
-                                {labels[i]}
-                            </label>
-                        );
-                    })}
+                    <span style={{ fontSize: 12, color: "var(--app-muted-text)" }}>
+                        Provider: {selectedProviderTitle || selectedProviderId || "Not selected"}
+                    </span>
                     <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, cursor: "pointer", userSelect: "none", marginLeft: "auto" }}>
                         <input type="checkbox" checked={clearOldTabs} onChange={e => setClearOldTabs(e.target.checked)}
                             style={{ margin: 0, cursor: "pointer" }} />

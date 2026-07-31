@@ -13,6 +13,59 @@ const PAGE_STORAGE_KEY = "app_last_page";
 const PAGES = ["main", "settings", "information", "snapshots", "debugging", "patients", "sessionSummaries", "applicationLogs"] as const;
 type Page = typeof PAGES[number];
 
+type DataProvider = {
+    id: string;
+    title?: string | null;
+};
+
+type DataProviderFactory = {
+    factoryId: string;
+    title: string;
+    dataProviders: DataProvider[];
+};
+
+type SelectedProviderContext = {
+    factoryTitle: string;
+    providerId: string;
+    providerTitle: string;
+};
+
+function getStringField(obj: Record<string, unknown>, keys: string[]): string {
+    for (const key of keys) {
+        const value = obj[key];
+        if (typeof value === "string") {
+            return value;
+        }
+    }
+    return "";
+}
+
+function normalizeProvidersResponse(payload: unknown): DataProviderFactory[] {
+    if (!Array.isArray(payload)) {
+        return [];
+    }
+
+    return payload.map((entry): DataProviderFactory => {
+        const factoryObj = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
+        const rawProviders = factoryObj["dataProviders"] ?? factoryObj["DataProviders"] ?? factoryObj["item3"] ?? factoryObj["Item3"];
+        const providersArray = Array.isArray(rawProviders) ? rawProviders : [];
+
+        const dataProviders: DataProvider[] = providersArray.map((provider): DataProvider => {
+            const providerObj = provider && typeof provider === "object" ? (provider as Record<string, unknown>) : {};
+            return {
+                id: getStringField(providerObj, ["id", "Id"]),
+                title: getStringField(providerObj, ["title", "Title", "optionalTitle", "OptionalTitle"]) || null,
+            };
+        });
+
+        return {
+            factoryId: getStringField(factoryObj, ["factoryId", "FactoryId", "item1", "Item1"]),
+            title: getStringField(factoryObj, ["title", "Title", "item2", "Item2"]),
+            dataProviders,
+        };
+    });
+}
+
 const initializeApp = async () => {
     await connectToSignalR();
 };
@@ -99,7 +152,36 @@ function App() {
 
     const [page, setPage] = useState<Page>("main");
     const [isLeftFlyPanelOpen, setIsLeftFlyPanelOpen] = useState<boolean>(false);
+    const [dataProviderFactories, setDataProviderFactories] = useState<DataProviderFactory[]>([]);
+    const [isLoadingProviders, setIsLoadingProviders] = useState<boolean>(false);
+    const [providersError, setProvidersError] = useState<string>("");
+    const [openFactoryId, setOpenFactoryId] = useState<string | null>(null);
+    const [selectedProviderContext, setSelectedProviderContext] = useState<SelectedProviderContext | null>(null);
     const isRunningInWebView2 = Boolean((window as unknown as { chrome?: { webview?: unknown } }).chrome?.webview);
+    const loadProviders = useCallback(async () => {
+        setIsLoadingProviders(true);
+        setProvidersError("");
+
+        try {
+            const response = await fetch("/api/Logging/GetProviders", { method: "GET" });
+
+            if (!response.ok) {
+                const errorBody = await response.text().catch(() => "");
+                throw new Error(`${response.status} ${response.statusText}${errorBody ? ` — ${errorBody}` : ""}`);
+            }
+
+            const raw = (await response.json()) as unknown;
+            const providers = normalizeProvidersResponse(raw);
+            setDataProviderFactories(providers);
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            setProvidersError(errorMessage);
+            ecsLogger.error("Failed to load data providers", error);
+        } finally {
+            setIsLoadingProviders(false);
+        }
+    }, []);
+
     const pathToPage = (pathname: string): Page => {
         const normalized = pathname.replace(/\/+$/, "");
         if (normalized === "" || normalized === "/") {
@@ -199,16 +281,117 @@ function App() {
         const webview = (window as unknown as { chrome?: { webview?: EventTarget } }).chrome?.webview;
         webview?.addEventListener?.("message", onWebViewMessage);
 
-        initializeApp()
+        void initializeApp();
+        void loadProviders();
 
         return () => {
             window.removeEventListener("popstate", onPopState);
             window.removeEventListener("keydown", onKeyDown);
             (window as unknown as { chrome?: { webview?: EventTarget } }).chrome?.webview?.removeEventListener?.("message", onWebViewMessage);
         };
-    }, []);
+    }, [loadProviders]);
 
     const content = (() => {
+        if (page === "main") {
+            return (
+                <div style={{ padding: 16 }}>
+                    <h2 style={{ margin: "0 0 12px 0" }}>Data Providers</h2>
+                    {isLoadingProviders && <div>Loading providers...</div>}
+                    {!isLoadingProviders && providersError && (
+                        <div style={{ color: "var(--danger, #dc2626)", marginBottom: 12 }}>
+                            Failed to load providers: {providersError}
+                        </div>
+                    )}
+                    {!isLoadingProviders && !providersError && dataProviderFactories.length === 0 && (
+                        <div>No data providers were returned by the server.</div>
+                    )}
+                    {!isLoadingProviders && !providersError && dataProviderFactories.length > 0 && (
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+                            {dataProviderFactories.map((factory) => (
+                                <section
+                                    key={factory.factoryId}
+                                    style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, background: "var(--surface-2)", position: "relative" }}
+                                >
+                                    <button
+                                        type="button"
+                                        onClick={() => setOpenFactoryId((current) => current === factory.factoryId ? null : factory.factoryId)}
+                                        style={{
+                                            width: "100%",
+                                            textAlign: "left",
+                                            border: "1px solid var(--border)",
+                                            borderRadius: 8,
+                                            background: "var(--surface-1)",
+                                            color: "var(--app-text)",
+                                            padding: "12px 10px",
+                                            cursor: "pointer",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "space-between",
+                                            fontSize: 14,
+                                            fontWeight: 600,
+                                        }}
+                                    >
+                                        <span>{factory.title}</span>
+                                        <span style={{ fontSize: 12, color: "var(--app-muted-text)" }}>
+                                            {factory.dataProviders.length} provider{factory.dataProviders.length === 1 ? "" : "s"}
+                                        </span>
+                                    </button>
+
+                                    {openFactoryId === factory.factoryId && (
+                                        <div
+                                            style={{
+                                                position: "absolute",
+                                                left: 12,
+                                                right: 12,
+                                                top: 62,
+                                                zIndex: 20,
+                                                border: "1px solid var(--border)",
+                                                borderRadius: 8,
+                                                background: "var(--surface-2)",
+                                                boxShadow: "0 10px 24px rgba(0,0,0,0.18)",
+                                                padding: 8,
+                                                maxHeight: 240,
+                                                overflowY: "auto",
+                                            }}
+                                        >
+                                            {factory.dataProviders.map((provider) => (
+                                                <button
+                                                    key={`${factory.factoryId}-${provider.id}`}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setSelectedProviderContext({
+                                                            factoryTitle: factory.title,
+                                                            providerId: provider.id,
+                                                            providerTitle: provider.title?.trim() || provider.id,
+                                                        });
+                                                        setOpenFactoryId(null);
+                                                        navigate("applicationLogs");
+                                                    }}
+                                                    style={{
+                                                        width: "100%",
+                                                        textAlign: "left",
+                                                        border: "none",
+                                                        borderRadius: 6,
+                                                        padding: "8px 10px",
+                                                        background: "transparent",
+                                                        color: "var(--app-text)",
+                                                        cursor: "pointer",
+                                                        fontSize: 13,
+                                                    }}
+                                                >
+                                                    {provider.title?.trim() || provider.id}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </section>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         if (page === "settings") {
             return <Settings onBack={() => navigate("main")} />;
         }
@@ -218,7 +401,14 @@ function App() {
         }
 
         if (page === "applicationLogs") {
-            return <ApplicationLogs onBack={() => navigate("main")} />;
+            return (
+                <ApplicationLogs
+                    onBack={() => navigate("main")}
+                    selectedFactoryTitle={selectedProviderContext?.factoryTitle ?? ""}
+                    selectedProviderId={selectedProviderContext?.providerId ?? ""}
+                    selectedProviderTitle={selectedProviderContext?.providerTitle ?? ""}
+                />
+            );
         }
 
         return null;
