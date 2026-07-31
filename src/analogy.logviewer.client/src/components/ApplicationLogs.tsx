@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ANALOGY_LOG_LEVEL, type AnalogyLogLevel, type AnalogyLogMessage } from "../types/analogyLogMessage";
+import { connection, joinProviderGroup, leaveProviderGroup } from "../services/realtime.services";
+import { ecsLogger } from "../services/ecsLogger";
 
 const DEFAULT_LOG_PATH = "C:\\MVD2\\Logs\\ECS\\";
 const FILE_PATH_STORAGE_KEY = "appLogs_filePath";
@@ -10,6 +12,7 @@ type Props = {
     selectedFactoryTitle: string;
     selectedProviderId: string;
     selectedProviderTitle: string;
+    selectedProviderType: string;
 };
 
 type SortKey = "date" | "processId" | "text" | "level" | "module" | "source" | "user" | "threadId" | "machineName" | "rawText" | "lineNumber";
@@ -349,7 +352,7 @@ interface LogTab {
     error: string;
 }
 
-export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProviderId, selectedProviderTitle }: Props) {
+export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProviderId, selectedProviderTitle, selectedProviderType }: Props) {
     const [filePath, setFilePath] = useState(() => {
         try {
             return localStorage.getItem(FILE_PATH_STORAGE_KEY) ?? DEFAULT_LOG_PATH;
@@ -363,6 +366,7 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
     const [loading, setLoading] = useState(false);
     const [loadError, setLoadError] = useState<string>("");
     const [clearOldTabs, setClearOldTabs] = useState(true);
+    const isRealtimeProvider = selectedProviderType.toLowerCase() === "realtime";
 
     const activeTab = tabs.find(t => t.id === activeTabId) ?? null;
     const logs = activeTab?.logs ?? [];
@@ -431,7 +435,85 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
         });
     };
 
+    useEffect(() => {
+        if (!isRealtimeProvider || !selectedProviderId) {
+            return;
+        }
+
+        const realtimeTabId = `realtime-${selectedProviderId}`;
+        setTabs([
+            {
+                id: realtimeTabId,
+                label: `Realtime stream (${selectedProviderTitle || selectedProviderId})`,
+                filePath: "",
+                providerId: selectedProviderId,
+                providerTitle: selectedProviderTitle,
+                factoryTitle: selectedFactoryTitle,
+                logs: [],
+                loadedAt: new Date().toISOString(),
+                error: "",
+            },
+        ]);
+        setActiveTabId(realtimeTabId);
+        setSelectedIdx(null);
+        setLoadError("");
+
+        let disposed = false;
+        const onProviderLogMessage = (message: AnalogyLogMessage) => {
+            if (disposed) {
+                return;
+            }
+
+            setTabs(prev => prev.map(t =>
+                t.id === realtimeTabId
+                    ? { ...t, logs: [...t.logs, message], loadedAt: new Date().toISOString(), error: "" }
+                    : t,
+            ));
+        };
+
+        const startRealtimeStream = async () => {
+            setLoading(true);
+            try {
+                ecsLogger.info(`Starting realtime stream for provider ${selectedProviderId}`);
+                const params = new URLSearchParams({ dataProviderId: selectedProviderId });
+                const res = await fetch(`/api/Logging/StartRealtimeStream?${params.toString()}`, { method: "POST" });
+                if (!res.ok) {
+                    const text = await res.text().catch(() => "");
+                    setLoadError(`${res.status} ${res.statusText}${text ? ` — ${text}` : ""}`);
+                    return;
+                }
+
+                connection.on("ProviderLogMessage", onProviderLogMessage);
+                try {
+                    await joinProviderGroup(selectedProviderId);
+                } catch (joinError) {
+                    ecsLogger.error("Failed to join provider SignalR group", joinError);
+                    setLoadError(joinError instanceof Error ? joinError.message : String(joinError));
+                }
+            } catch (e) {
+                setLoadError(e instanceof Error ? e.message : String(e));
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        void startRealtimeStream();
+
+        return () => {
+            disposed = true;
+            connection.off("ProviderLogMessage", onProviderLogMessage);
+            void leaveProviderGroup(selectedProviderId);
+            const params = new URLSearchParams({ dataProviderId: selectedProviderId });
+            void fetch(`/api/Logging/StopRealtimeStream?${params.toString()}`, { method: "POST" });
+        };
+    }, [isRealtimeProvider, selectedProviderId, selectedProviderTitle, selectedFactoryTitle]);
+
     const loadLogs = async (pathOverride?: string) => {
+        if (isRealtimeProvider) {
+            setLoadError("Selected provider is realtime. File loading is disabled.");
+            return;
+        }
+
         const path = (pathOverride ?? filePath).trim();
         if (!path) {
             setLoadError("Enter a file path first.");
@@ -527,6 +609,7 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
 
     const reloadActiveTab = async () => {
         if (!activeTab) return;
+        if (isRealtimeProvider) return;
         setLoading(true);
         const tabId = activeTab.id;
         const tabPath = activeTab.filePath;
@@ -718,7 +801,7 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
                 <span style={{ fontWeight: 700, fontSize: 16 }}>Application Logs</span>
                 {selectedProviderId && (
                     <span style={{ color: "var(--app-muted-text)", fontSize: 12 }}>
-                        {selectedFactoryTitle} / {selectedProviderTitle || selectedProviderId}
+                        {selectedFactoryTitle} / {selectedProviderTitle || selectedProviderId} ({selectedProviderType})
                     </span>
                 )}
                 {activeTab && !loading && !activeTab.error && (
@@ -732,7 +815,7 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
             </div>
 
             {/* File load panel */}
-            {!isFullView && (<div style={{
+            {!isFullView && !isRealtimeProvider && (<div style={{
                 border: "1px solid var(--border)",
                 borderRadius: 6,
                 padding: "6px 8px",
@@ -1022,7 +1105,7 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
                             Clear Log
                         </button>
                         <button type="button" disabled={!activeTab || loading} onClick={() => void reloadActiveTab()} title="Reload the current tab's log file"
-                            style={{ ...tbBtn, color: (activeTab && !loading) ? "#16a34a" : undefined, opacity: (!activeTab || loading) ? 0.45 : 1 }}>
+                            style={{ ...tbBtn, color: (activeTab && !loading && !isRealtimeProvider) ? "#16a34a" : undefined, opacity: (!activeTab || loading || isRealtimeProvider) ? 0.45 : 1 }}>
                             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
                             Reload Files
                         </button>
@@ -1079,11 +1162,11 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
                 {loading ? (
                     <div style={{ padding: 16, color: "var(--app-muted-text)", fontSize: 13 }}>Loading…</div>
                 ) : !activeTab ? (
-                    <div style={{ padding: 16, color: "var(--app-muted-text)", fontSize: 13 }}>Load a log file to view entries.</div>
+                    <div style={{ padding: 16, color: "var(--app-muted-text)", fontSize: 13 }}>{isRealtimeProvider ? "Waiting for realtime stream..." : "Load a log file to view entries."}</div>
                 ) : activeTab.error ? (
                     <div style={{ padding: 16, color: "var(--danger, #dc2626)", fontSize: 13 }}>{activeTab.error}</div>
                 ) : logs.length === 0 ? (
-                    <div style={{ padding: 16, color: "var(--app-muted-text)", fontSize: 13 }}>No entries in this log file.</div>
+                    <div style={{ padding: 16, color: "var(--app-muted-text)", fontSize: 13 }}>{isRealtimeProvider ? "No realtime messages received yet." : "No entries in this log file."}</div>
                 ) : sorted.length === 0 ? (
                     <div style={{ padding: 16, color: "var(--app-muted-text)", fontSize: 13 }}>No entries match the current filters.</div>
                 ) : (

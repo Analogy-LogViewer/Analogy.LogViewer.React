@@ -1,6 +1,7 @@
 
 using Analogy.Interfaces;
 using Analogy.LogViewer.Server.Interfaces;
+using Analogy.LogViewer.Server.Realtime;
 using Analogy.LogViewer.Server.Types;
 using Analogy.LogViewer.Template.Managers;
 using Elastic.CommonSchema;
@@ -22,8 +23,10 @@ namespace Analogy.LogViewer.Server
             builder.Services.AddSingleton<IUserSettingsManager>(provider => provider.GetRequiredService<UserSettingsManager>());
             builder.Services.AddSingleton<IAnalogyUserSettings>(provider => provider.GetRequiredService<UserSettingsManager>());
             builder.Services.AddSingleton<IFactoriesManager, FactoriesManager>();
+            builder.Services.AddSingleton<RealtimeStreamingService>();
 
             builder.Services.AddControllers();
+            builder.Services.AddSignalR();
             // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
             builder.Services.AddOpenApi();
 
@@ -44,6 +47,7 @@ namespace Analogy.LogViewer.Server
 
 
             app.MapControllers();
+            app.MapHub<ProvidersHub>("/providersHub");
 
             app.MapFallbackToFile("/index.html");
             var factories = app.Services.GetRequiredService<IFactoriesManager>();

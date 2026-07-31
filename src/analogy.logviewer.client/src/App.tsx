@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from "react-dom";
-import { connectToSignalR, connection } from "./services/realtime.services";
+import { connectToSignalR } from "./services/realtime.services";
 import { StatusToolbar } from "./components/StatusToolbar";
 import { Settings } from "./components/Settings";
 import { Information } from "./components/Information";
@@ -30,6 +30,7 @@ type SelectedProviderContext = {
     factoryTitle: string;
     providerId: string;
     providerTitle: string;
+    providerType: string;
 };
 
 function parseSelectedProviderContext(value: string | null): SelectedProviderContext | null {
@@ -47,6 +48,7 @@ function parseSelectedProviderContext(value: string | null): SelectedProviderCon
         const factoryTitle = typeof obj["factoryTitle"] === "string" ? obj["factoryTitle"] : "";
         const providerId = typeof obj["providerId"] === "string" ? obj["providerId"] : "";
         const providerTitle = typeof obj["providerTitle"] === "string" ? obj["providerTitle"] : "";
+        const providerType = typeof obj["providerType"] === "string" ? obj["providerType"] : "Unknown";
 
         if (!providerId) {
             return null;
@@ -56,6 +58,7 @@ function parseSelectedProviderContext(value: string | null): SelectedProviderCon
             factoryTitle,
             providerId,
             providerTitle,
+            providerType,
         };
     } catch {
         return null;
@@ -191,6 +194,21 @@ function App() {
     const [openFactoryId, setOpenFactoryId] = useState<string | null>(null);
     const [selectedProviderContext, setSelectedProviderContext] = useState<SelectedProviderContext | null>(null);
     const isRunningInWebView2 = Boolean((window as unknown as { chrome?: { webview?: unknown } }).chrome?.webview);
+    const resolvedSelectedProviderType = (() => {
+        const selectedProviderId = selectedProviderContext?.providerId;
+        if (!selectedProviderId) {
+            return "Unknown";
+        }
+
+        for (const factory of dataProviderFactories) {
+            const provider = factory.dataProviders.find((p) => p.id === selectedProviderId);
+            if (provider?.type) {
+                return provider.type;
+            }
+        }
+
+        return selectedProviderContext?.providerType ?? "Unknown";
+    })();
     const loadProviders = useCallback(async () => {
         setIsLoadingProviders(true);
         setProvidersError("");
@@ -423,6 +441,7 @@ function App() {
                                                             factoryTitle: factory.title,
                                                             providerId: provider.id,
                                                             providerTitle: provider.title?.trim() || provider.id,
+                                                            providerType: provider.type || "Unknown",
                                                         });
                                                         setOpenFactoryId(null);
                                                         navigate("applicationLogs");
@@ -481,6 +500,7 @@ function App() {
                     selectedFactoryTitle={selectedProviderContext?.factoryTitle ?? ""}
                     selectedProviderId={selectedProviderContext?.providerId ?? ""}
                     selectedProviderTitle={selectedProviderContext?.providerTitle ?? ""}
+                    selectedProviderType={resolvedSelectedProviderType}
                 />
             );
         }

@@ -41,6 +41,7 @@ namespace Analogy.LogViewer.Server.Types
                 }
             }
         }
+
         public IEnumerable<IAnalogyOfflineDataProvider> GetOfflineDataSources(Guid factoryId)
         {
             foreach (var factory in Factories.Where(f => f.FactorySetting.Status != DataProviderFactoryStatus.Disabled))
@@ -48,7 +49,8 @@ namespace Analogy.LogViewer.Server.Types
                 foreach (var dataProvidersFactory in factory.DataProvidersFactories)
                 {
                     var supported = dataProvidersFactory.DataProviders.Where(i =>
-                        dataProvidersFactory.FactoryId == factoryId && i is IAnalogyOfflineDataProvider).Cast<IAnalogyOfflineDataProvider>();
+                            dataProvidersFactory.FactoryId == factoryId && i is IAnalogyOfflineDataProvider)
+                        .Cast<IAnalogyOfflineDataProvider>();
                     foreach (var dataSource in supported)
                     {
                         yield return dataSource;
@@ -56,6 +58,7 @@ namespace Analogy.LogViewer.Server.Types
                 }
             }
         }
+
         public IEnumerable<IAnalogyOfflineDataProvider> GetSupportedOfflineDataSourcesFromFactory(Guid factoryId,
             string[] fileNames)
         {
@@ -65,6 +68,7 @@ namespace Analogy.LogViewer.Server.Types
 
         public Assembly? GetAssemblyOfFactory(IAnalogyFactory factory)
             => Factories.SingleOrDefault(f => f.Factory == factory)?.Assembly;
+
         public List<IAnalogyDataProviderSettings> GetProvidersSettings() => Factories
             .Where(f => f.FactorySetting.Status != DataProviderFactoryStatus.Disabled)
             .SelectMany(f => f.DataProvidersSettings)
@@ -73,6 +77,7 @@ namespace Analogy.LogViewer.Server.Types
 
         public List<FactoryContainer> GetFactoryContainer(Guid componentId)
             => Factories.Where(f => f.ContainsDataProviderOrDataFactory(componentId)).ToList();
+
         public IEnumerable<IAnalogyExtension> GetExtensions(IAnalogyDataProvider dataProvider)
             => GetAllExtensions().Where(e => e.TargetComponentId == dataProvider.Id);
 
@@ -94,6 +99,7 @@ namespace Analogy.LogViewer.Server.Types
                 }
             }
         }
+
         public IEnumerable<(IAnalogyExtension Extension, Assembly Assembly)> GetAllExtensionsWithAssemblies()
         {
             foreach (var factory in Factories)
@@ -152,7 +158,8 @@ namespace Analogy.LogViewer.Server.Types
                 }
                 catch (Exception e)
                 {
-                    Logger.LogError(e, $"Error Initialize Real time provider: {dataProvider.OptionalTitle}: {e.Message}", e);
+                    Logger.LogError(e,
+                        $"Error Initialize Real time provider: {dataProvider.OptionalTitle}: {e.Message}", e);
                 }
             }
         }
@@ -165,7 +172,9 @@ namespace Analogy.LogViewer.Server.Types
             }
 
             ExternalAdded = true;
+
             #region load assemblies
+
             var analogyAssemblies = Directory.EnumerateFiles(AppDomain.CurrentDomain.BaseDirectory,
                 @"*Analogy.LogViewer.*.dll", SearchOption.AllDirectories).ToList();
             if (Settings.AdditionalProbingLocations != null)
@@ -187,8 +196,11 @@ namespace Analogy.LogViewer.Server.Types
                     }
                 }
             }
+
             #endregion
+
             #region load types
+
             var typesToLoad = new List<(Assembly Assembly, string FileName, List<Type> Types)>();
             foreach (string aFile in analogyAssemblies)
             {
@@ -212,11 +224,15 @@ namespace Analogy.LogViewer.Server.Types
                 }
                 catch (Exception e)
                 {
-                    Logger.LogError(e, $"{aFile}: Error during data providers: {e} ({e.InnerException}. {aFile})", nameof(FactoriesManager));
+                    Logger.LogError(e, $"{aFile}: Error during data providers: {e} ({e.InnerException}. {aFile})",
+                        nameof(FactoriesManager));
                 }
             }
+
             #endregion
+
             #region Load Factories
+
             foreach ((Assembly assembly, string fileName, List<Type> types) in typesToLoad)
             {
                 foreach (var f in types.Where(aType => aType.GetInterface(nameof(IAnalogyFactory)) != null))
@@ -244,19 +260,25 @@ namespace Analogy.LogViewer.Server.Types
                                 AnalogyNonPersistSettings.AddDependencyLocation(path);
                             }
                         }
+
                         factory.RegisterNotificationCallback(NotificationManager);
                         Factories.Add(fc);
                     }
                     catch (Exception e)
                     {
-                        Logger.LogError($"{fileName}: Error during data providers: {e} ({e.InnerException}. {fileName})", nameof(FactoriesManager));
+                        Logger.LogError(
+                            $"{fileName}: Error during data providers: {e} ({e.InnerException}. {fileName})",
+                            nameof(FactoriesManager));
                     }
                 }
             }
+
             #endregion
+
             foreach ((Assembly assembly, string fileName, List<Type> types) in typesToLoad)
             {
-                foreach (Type dpf in types.Where(aType => aType.GetInterface(nameof(IAnalogyDataProvidersFactory)) != null))
+                foreach (Type dpf in types.Where(aType =>
+                             aType.GetInterface(nameof(IAnalogyDataProvidersFactory)) != null))
                 {
                     try
                     {
@@ -265,6 +287,7 @@ namespace Analogy.LogViewer.Server.Types
                         {
                             continue;
                         }
+
                         var factory = Factories.First(f => f.Factory.FactoryId == dataProviderFactory?.FactoryId);
                         factory.AddDataProviderFactory(dataProviderFactory);
                     }
@@ -276,7 +299,8 @@ namespace Analogy.LogViewer.Server.Types
                     }
                 }
 
-                foreach (Type isettings in types.Where(aType => aType.GetInterface(nameof(IAnalogyDataProviderSettings)) != null))
+                foreach (Type isettings in types.Where(aType =>
+                             aType.GetInterface(nameof(IAnalogyDataProviderSettings)) != null))
                 {
                     try
                     {
@@ -285,16 +309,20 @@ namespace Analogy.LogViewer.Server.Types
                         {
                             continue;
                         }
+
                         var factory = Factories.First(f => f.Factory.FactoryId == settings?.FactoryId);
                         factory.AddDataProvidersSettings(settings);
                     }
                     catch (Exception e)
                     {
-                        Logger.LogError($"{fileName}: Error during data providers: {e} ({e.InnerException}. {fileName})", nameof(FactoriesManager));
+                        Logger.LogError(
+                            $"{fileName}: Error during data providers: {e} ({e.InnerException}. {fileName})",
+                            nameof(FactoriesManager));
                     }
                 }
 
-                foreach (Type iaction in types.Where(aType => aType.GetInterface(nameof(IAnalogyCustomActionsFactory)) != null))
+                foreach (Type iaction in types.Where(aType =>
+                             aType.GetInterface(nameof(IAnalogyCustomActionsFactory)) != null))
                 {
                     try
                     {
@@ -303,16 +331,20 @@ namespace Analogy.LogViewer.Server.Types
                         {
                             continue;
                         }
+
                         var factory = Factories.First(f => f.Factory.FactoryId == custom?.FactoryId);
                         factory.AddCustomActionFactory(custom);
                     }
                     catch (Exception e)
                     {
-                        Logger.LogError($"{fileName}: Error during data providers: {e} ({e.InnerException}. {fileName})", nameof(FactoriesManager));
+                        Logger.LogError(
+                            $"{fileName}: Error during data providers: {e} ({e.InnerException}. {fileName})",
+                            nameof(FactoriesManager));
                     }
                 }
 
-                foreach (Type ishare in types.Where(aType => aType.GetInterface(nameof(IAnalogyShareableFactory)) != null))
+                foreach (Type ishare in types.Where(aType =>
+                             aType.GetInterface(nameof(IAnalogyShareableFactory)) != null))
                 {
                     try
                     {
@@ -322,11 +354,14 @@ namespace Analogy.LogViewer.Server.Types
                     }
                     catch (Exception e)
                     {
-                        Logger.LogError($"{fileName}: Error during data providers: {e} ({e.InnerException}. {fileName})", nameof(FactoriesManager));
+                        Logger.LogError(
+                            $"{fileName}: Error during data providers: {e} ({e.InnerException}. {fileName})",
+                            nameof(FactoriesManager));
                     }
                 }
 
-                foreach (Type aType in types.Where(aType => aType.GetInterface(nameof(IAnalogyExtensionsFactory)) != null))
+                foreach (Type aType in types.Where(aType =>
+                             aType.GetInterface(nameof(IAnalogyExtensionsFactory)) != null))
                 {
                     try
                     {
@@ -336,11 +371,14 @@ namespace Analogy.LogViewer.Server.Types
                     }
                     catch (Exception e)
                     {
-                        Logger.LogError($"{fileName}: Error during data providers: {e} ({e.InnerException}. {fileName})", nameof(FactoriesManager));
+                        Logger.LogError(
+                            $"{fileName}: Error during data providers: {e} ({e.InnerException}. {fileName})",
+                            nameof(FactoriesManager));
                     }
                 }
 
-                foreach (Type aType in types.Where(aType => aType.GetInterface(nameof(IAnalogyDownloadInformation)) != null))
+                foreach (Type aType in types.Where(aType =>
+                             aType.GetInterface(nameof(IAnalogyDownloadInformation)) != null))
                 {
                     try
                     {
@@ -350,7 +388,9 @@ namespace Analogy.LogViewer.Server.Types
                     }
                     catch (Exception e)
                     {
-                        Logger.LogError($"{fileName}: Error during data providers: {e} ({e.InnerException}. {fileName})", nameof(FactoriesManager));
+                        Logger.LogError(
+                            $"{fileName}: Error during data providers: {e} ({e.InnerException}. {fileName})",
+                            nameof(FactoriesManager));
                     }
                 }
 
@@ -364,11 +404,14 @@ namespace Analogy.LogViewer.Server.Types
                     }
                     catch (Exception e)
                     {
-                        Logger.LogError($"{fileName}: Error during plotter loading: {e} ({e.InnerException}. {fileName})", nameof(FactoriesManager));
+                        Logger.LogError(
+                            $"{fileName}: Error during plotter loading: {e} ({e.InnerException}. {fileName})",
+                            nameof(FactoriesManager));
                     }
                 }
 
-                foreach (Type policyType in types.Where(aType => aType.GetInterface(nameof(IAnalogyPolicyEnforcer)) != null))
+                foreach (Type policyType in types.Where(aType =>
+                             aType.GetInterface(nameof(IAnalogyPolicyEnforcer)) != null))
                 {
                     try
                     {
@@ -381,11 +424,14 @@ namespace Analogy.LogViewer.Server.Types
                     }
                     catch (Exception e)
                     {
-                        Logger.LogError($"{fileName}: Error during plotter loading: {e} ({e.InnerException}. {fileName})", nameof(FactoriesManager));
+                        Logger.LogError(
+                            $"{fileName}: Error during plotter loading: {e} ({e.InnerException}. {fileName})",
+                            nameof(FactoriesManager));
                     }
                 }
             }
         }
+
         public IEnumerable<IAnalogyOfflineDataProvider> GetAllOfflineDataSources(IEnumerable<Guid> dataProviders)
         {
             foreach (var fc in Factories)
@@ -394,10 +440,12 @@ namespace Analogy.LogViewer.Server.Types
                 {
                     continue;
                 }
+
                 foreach (var dpf in fc.DataProvidersFactories)
                 {
                     IEnumerable<IAnalogyOfflineDataProvider> supported =
-                        dpf.DataProviders.Where(d => d is IAnalogyOfflineDataProvider).Cast<IAnalogyOfflineDataProvider>();
+                        dpf.DataProviders.Where(d => d is IAnalogyOfflineDataProvider)
+                            .Cast<IAnalogyOfflineDataProvider>();
                     foreach (var analogyDataSource in supported)
                     {
                         if (dataProviders.Any(dp => dp == analogyDataSource.Id))
@@ -407,6 +455,30 @@ namespace Analogy.LogViewer.Server.Types
                     }
                 }
             }
+        }
+
+        public IAnalogyRealTimeDataProvider? GetRealtimeProvider(Guid providerId)
+        {
+            foreach (var fc in Factories)
+            {
+                if (fc.FactorySetting.Status == DataProviderFactoryStatus.Disabled)
+                {
+                    continue;
+                }
+                foreach (var dpf in fc.DataProvidersFactories)
+                {
+                    IEnumerable<IAnalogyRealTimeDataProvider> supported =
+                        dpf.DataProviders.Where(d => d is IAnalogyRealTimeDataProvider).Cast<IAnalogyRealTimeDataProvider>();
+                    foreach (var analogyDataSource in supported)
+                    {
+                        if (analogyDataSource.Id.Equals(providerId))
+                        { 
+                            return analogyDataSource;
+                        }
+                    }
+                }
+            }
+            return null;
         }
     }
 }

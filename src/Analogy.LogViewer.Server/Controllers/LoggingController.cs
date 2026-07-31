@@ -1,6 +1,7 @@
 ﻿using Analogy.Interfaces;
 using Analogy.Interfaces.DataTypes;
 using Analogy.LogViewer.Server.Interfaces;
+using Analogy.LogViewer.Server.Realtime;
 using Analogy.LogViewer.Server.Types;
 using Microsoft.AspNetCore.Mvc;
 
@@ -40,6 +41,50 @@ namespace Analogy.LogViewer.Server.Controllers
                 }
             }
         }
+
+        [HttpPost]
+        [Route("StartRealtimeStream")]
+        public async Task<ActionResult> StartRealtimeStream(
+            [FromQuery] Guid? dataProviderId = null,
+            [FromServices] RealtimeStreamingService? realtimeStreamingService = null)
+        {
+            if (dataProviderId is null || dataProviderId == Guid.Empty)
+            {
+                return BadRequest("A valid data provider id is required.");
+            }
+            if (realtimeStreamingService is null)
+            {
+                return BadRequest("Realtime streaming service is not available.");
+            }
+
+            var result = await realtimeStreamingService.StartProviderStream(dataProviderId.Value);
+            if (!result.Ok)
+            {
+                return BadRequest(result.Error ?? "Failed to start realtime stream.");
+            }
+
+            return Ok();
+        }
+
+        [HttpPost]
+        [Route("StopRealtimeStream")]
+        public async Task<ActionResult> StopRealtimeStream(
+            [FromQuery] Guid? dataProviderId = null,
+            [FromServices] RealtimeStreamingService? realtimeStreamingService = null)
+        {
+            if (dataProviderId is null || dataProviderId == Guid.Empty)
+            {
+                return BadRequest("A valid data provider id is required.");
+            }
+            if (realtimeStreamingService is null)
+            {
+                return BadRequest("Realtime streaming service is not available.");
+            }
+
+            await realtimeStreamingService.StopProviderStream(dataProviderId.Value);
+            return Ok();
+        }
+
         [HttpGet]
         [Route("GetLog")]
         public async Task<ActionResult<List<IAnalogyLogMessage>>> GetLog(
