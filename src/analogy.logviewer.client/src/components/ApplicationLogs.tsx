@@ -38,6 +38,37 @@ function getLevelLabel(level: unknown): string {
     return String(level);
 }
 
+function normalizeRealtimeMessage(raw: unknown): AnalogyLogMessage | null {
+    if (!raw || typeof raw !== "object") {
+        return null;
+    }
+
+    const msg = raw as Record<string, unknown>;
+    const get = (camel: string, pascal: string) => msg[camel] ?? msg[pascal];
+
+    return {
+        text: String(get("text", "Text") ?? ""),
+        category: String(get("category", "Category") ?? ""),
+        source: String(get("source", "Source") ?? ""),
+        module: String(get("module", "Module") ?? ""),
+        methodName: String(get("methodName", "MethodName") ?? ""),
+        fileName: String(get("fileName", "FileName") ?? ""),
+        level: (get("level", "Level") as AnalogyLogLevel | undefined) ?? 0,
+        date: String(get("date", "Date") ?? new Date().toISOString()),
+        id: String(get("id", "Id") ?? `${Date.now()}-${Math.random()}`),
+        processId: Number(get("processId", "ProcessId") ?? 0),
+        threadId: Number(get("threadId", "ThreadId") ?? 0),
+        lineNumber: Number(get("lineNumber", "LineNumber") ?? 0),
+        machineName: String(get("machineName", "MachineName") ?? ""),
+        user: String(get("user", "User") ?? ""),
+        parameters: String(get("parameters", "Parameters") ?? ""),
+        rawText: String(get("rawText", "RawText") ?? ""),
+        rawTextType: String(get("rawTextType", "RawTextType") ?? "Unknown"),
+        isPartOfMultilineMessage: Boolean(get("isPartOfMultilineMessage", "IsPartOfMultilineMessage") ?? false),
+        additionalInformation: (get("additionalInformation", "AdditionalInformation") as Record<string, string> | null | undefined) ?? null,
+    };
+}
+
 function getLevelColor(level: unknown): string {
     const label = getLevelLabel(level).toLowerCase();
     if (label === "error") return "var(--danger, #dc2626)";
@@ -459,14 +490,19 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
         setLoadError("");
 
         let disposed = false;
-        const onProviderLogMessage = (message: AnalogyLogMessage) => {
+        const onProviderLogMessage = (message: unknown) => {
             if (disposed) {
+                return;
+            }
+
+            const normalizedMessage = normalizeRealtimeMessage(message);
+            if (!normalizedMessage) {
                 return;
             }
 
             setTabs(prev => prev.map(t =>
                 t.id === realtimeTabId
-                    ? { ...t, logs: [...t.logs, message], loadedAt: new Date().toISOString(), error: "" }
+                    ? { ...t, logs: [...t.logs, normalizedMessage], loadedAt: new Date().toISOString(), error: "" }
                     : t,
             ));
         };
@@ -475,20 +511,21 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
             setLoading(true);
             try {
                 ecsLogger.info(`Starting realtime stream for provider ${selectedProviderId}`);
+                connection.off("ProviderLogMessage", onProviderLogMessage);
+                connection.on("ProviderLogMessage", onProviderLogMessage);
+
+                try {
+                    await joinProviderGroup(selectedProviderId);
+                } catch (joinError) {
+                    ecsLogger.error("Failed to join provider SignalR group", joinError);
+                }
+
                 const params = new URLSearchParams({ dataProviderId: selectedProviderId });
                 const res = await fetch(`/api/Logging/StartRealtimeStream?${params.toString()}`, { method: "POST" });
                 if (!res.ok) {
                     const text = await res.text().catch(() => "");
                     setLoadError(`${res.status} ${res.statusText}${text ? ` — ${text}` : ""}`);
                     return;
-                }
-
-                connection.on("ProviderLogMessage", onProviderLogMessage);
-                try {
-                    await joinProviderGroup(selectedProviderId);
-                } catch (joinError) {
-                    ecsLogger.error("Failed to join provider SignalR group", joinError);
-                    setLoadError(joinError instanceof Error ? joinError.message : String(joinError));
                 }
             } catch (e) {
                 setLoadError(e instanceof Error ? e.message : String(e));

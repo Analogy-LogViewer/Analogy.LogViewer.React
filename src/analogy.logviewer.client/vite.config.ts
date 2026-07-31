@@ -105,6 +105,11 @@ export default defineConfig({
                 target,
                 secure: false
             },
+            '^/providersHub': {
+                target,
+                secure: false,
+                ws: true
+            },
             '^/MediaManagerRealtimeData': {
                 target,
                 secure: false,

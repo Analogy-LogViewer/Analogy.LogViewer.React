@@ -1,12 +1,10 @@
 import { HubConnectionBuilder, HubConnectionState } from "@microsoft/signalr";
-import { MessagePackHubProtocol } from '@microsoft/signalr-protocol-msgpack';
 import { ecsLogger } from "./ecsLogger";
 
 const PIPE_URL = "/providersHub";
 
 export const connection = new HubConnectionBuilder()
     .withUrl(PIPE_URL)
-    .withHubProtocol(new MessagePackHubProtocol)
     .withAutomaticReconnect({ nextRetryDelayInMilliseconds: () => 2000 })
     .build();
 
