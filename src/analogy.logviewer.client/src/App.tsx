@@ -10,6 +10,7 @@ import { ErrorToast } from "./components/ErrorToast";
 import './App.css';
 
 const PAGE_STORAGE_KEY = "app_last_page";
+const SELECTED_PROVIDER_STORAGE_KEY = "app_selected_provider";
 const PAGES = ["main", "settings", "information", "snapshots", "debugging", "patients", "sessionSummaries", "applicationLogs"] as const;
 type Page = typeof PAGES[number];
 
@@ -29,6 +30,36 @@ type SelectedProviderContext = {
     providerId: string;
     providerTitle: string;
 };
+
+function parseSelectedProviderContext(value: string | null): SelectedProviderContext | null {
+    if (!value) {
+        return null;
+    }
+
+    try {
+        const parsed = JSON.parse(value) as unknown;
+        if (!parsed || typeof parsed !== "object") {
+            return null;
+        }
+
+        const obj = parsed as Record<string, unknown>;
+        const factoryTitle = typeof obj["factoryTitle"] === "string" ? obj["factoryTitle"] : "";
+        const providerId = typeof obj["providerId"] === "string" ? obj["providerId"] : "";
+        const providerTitle = typeof obj["providerTitle"] === "string" ? obj["providerTitle"] : "";
+
+        if (!providerId) {
+            return null;
+        }
+
+        return {
+            factoryTitle,
+            providerId,
+            providerTitle,
+        };
+    } catch {
+        return null;
+    }
+}
 
 function getStringField(obj: Record<string, unknown>, keys: string[]): string {
     for (const key of keys) {
@@ -235,7 +266,34 @@ function App() {
     }, [page]);
 
     useEffect(() => {
+        try {
+            if (!selectedProviderContext) {
+                localStorage.removeItem(SELECTED_PROVIDER_STORAGE_KEY);
+                return;
+            }
+
+            localStorage.setItem(SELECTED_PROVIDER_STORAGE_KEY, JSON.stringify(selectedProviderContext));
+        } catch {
+            // ignore storage errors
+        }
+    }, [selectedProviderContext]);
+
+    useEffect(() => {
         let initialPage = pathToPage(window.location.pathname);
+        let savedSelection: SelectedProviderContext | null = null;
+        try {
+            savedSelection = parseSelectedProviderContext(localStorage.getItem(SELECTED_PROVIDER_STORAGE_KEY));
+            if (savedSelection) {
+                setSelectedProviderContext(savedSelection);
+            }
+        } catch {
+            // ignore storage errors
+        }
+
+        if (initialPage === "main" && savedSelection) {
+            initialPage = "applicationLogs";
+        }
+
         if (initialPage === "main") {
             try {
                 const saved = localStorage.getItem(PAGE_STORAGE_KEY);
