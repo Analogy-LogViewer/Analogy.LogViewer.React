@@ -71,7 +71,7 @@ namespace Analogy.LogViewer.Server.Types
         public bool DefaultDescendOrder { get; set; }
         public ColorSettings ColorSettings { get; set; }
         public List<Guid> FactoriesOrder { get; set; }
-        public List<FactorySettings> FactoriesSettings { get; set; }
+        public List<FactorySettings> FactoriesSettings { get; set; } = [];
         public List<FileAssociations> FileAssociations { get; set; }
 
         public Guid LastOpenedDataProvider { get; set; }
