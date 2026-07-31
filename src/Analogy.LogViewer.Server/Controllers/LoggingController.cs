@@ -10,7 +10,7 @@ namespace Analogy.LogViewer.Server.Controllers
     [Route("api/[controller]")]
     public class LoggingController : ControllerBase
     {
-        public sealed record DataProviderDto(Guid Id, string Title);
+        public sealed record DataProviderDto(Guid Id, string Title, string Type);
         public sealed record DataProvidersFactoryDto(Guid FactoryId, string Title, IEnumerable<DataProviderDto> DataProviders);
 
         [HttpGet]
@@ -24,9 +24,16 @@ namespace Analogy.LogViewer.Server.Controllers
                     var providers = new List<DataProviderDto>();
                     foreach (var dataProvider in dfc.DataProviders)
                     {
+                        var providerType = dataProvider is IAnalogyRealTimeDataProvider
+                            ? "Realtime"
+                            : dataProvider is IAnalogyOfflineDataProvider
+                                ? "Offline"
+                                : "Unknown";
+
                         providers.Add(new DataProviderDto(
                             dataProvider.Id,
-                            string.IsNullOrWhiteSpace(dataProvider.OptionalTitle) ? dataProvider.Id.ToString() : dataProvider.OptionalTitle));
+                            string.IsNullOrWhiteSpace(dataProvider.OptionalTitle) ? dataProvider.Id.ToString() : dataProvider.OptionalTitle,
+                            providerType));
                     }
 
                     yield return new DataProvidersFactoryDto(dfc.FactoryId, dfc.Title, providers);

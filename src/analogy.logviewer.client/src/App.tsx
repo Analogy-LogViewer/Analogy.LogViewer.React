@@ -17,6 +17,7 @@ type Page = typeof PAGES[number];
 type DataProvider = {
     id: string;
     title?: string | null;
+    type?: string | null;
 };
 
 type DataProviderFactory = {
@@ -86,6 +87,7 @@ function normalizeProvidersResponse(payload: unknown): DataProviderFactory[] {
             return {
                 id: getStringField(providerObj, ["id", "Id"]),
                 title: getStringField(providerObj, ["title", "Title", "optionalTitle", "OptionalTitle"]) || null,
+                type: getStringField(providerObj, ["type", "Type"]) || null,
             };
         });
 
@@ -437,7 +439,21 @@ function App() {
                                                         fontSize: 13,
                                                     }}
                                                 >
-                                                    {provider.title?.trim() || provider.id}
+                                                    <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                                                        <span>{provider.title?.trim() || provider.id}</span>
+                                                        <span
+                                                            style={{
+                                                                fontSize: 11,
+                                                                padding: "2px 6px",
+                                                                borderRadius: 999,
+                                                                background: provider.type === "Realtime" ? "#0f766e" : provider.type === "Offline" ? "#1d4ed8" : "#6b7280",
+                                                                color: "#fff",
+                                                                whiteSpace: "nowrap",
+                                                            }}
+                                                        >
+                                                            {provider.type || "Unknown"}
+                                                        </span>
+                                                    </span>
                                                 </button>
                                             ))}
                                         </div>
