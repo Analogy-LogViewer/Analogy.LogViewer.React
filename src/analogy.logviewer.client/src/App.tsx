@@ -428,7 +428,7 @@ function App() {
                                                 background: "var(--surface-2)",
                                                 boxShadow: "0 10px 24px rgba(0,0,0,0.18)",
                                                 padding: 8,
-                                                maxHeight: 240,
+                                                maxHeight: 480,
                                                 overflowY: "auto",
                                             }}
                                         >
