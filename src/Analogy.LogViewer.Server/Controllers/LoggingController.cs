@@ -11,6 +11,8 @@ namespace Analogy.LogViewer.Server.Controllers
     [Route("api/[controller]")]
     public class LoggingController : ControllerBase
     {
+        private const long MaxUploadedLogFileSizeInBytes = 100 * 1024 * 1024;
+
         public sealed record DataProviderDto(Guid Id, string Title, string Type);
         public sealed record DataProvidersFactoryDto(Guid FactoryId, string Title, IEnumerable<DataProviderDto> DataProviders);
 
@@ -92,10 +94,75 @@ namespace Analogy.LogViewer.Server.Controllers
             [FromQuery] Guid? dataProviderId = null,
             [FromServices] IFactoriesManager? factoriesManager = null)
         {
+            if (string.IsNullOrWhiteSpace(filePath))
+            {
+                return BadRequest("File path is required.");
+            }
+
             if (!System.IO.File.Exists(filePath))
             {
                 return BadRequest($"File not found: {filePath}");
             }
+
+            return await ProcessLogFile(filePath, dataProviderId, factoriesManager);
+        }
+
+        [HttpPost]
+        [Route("GetLogFromUpload")]
+        [RequestSizeLimit(MaxUploadedLogFileSizeInBytes)]
+        [RequestFormLimits(MultipartBodyLengthLimit = MaxUploadedLogFileSizeInBytes)]
+        public async Task<ActionResult<List<IAnalogyLogMessage>>> GetLogFromUpload(
+            [FromForm] IFormFile? file = null,
+            [FromForm] Guid? dataProviderId = null,
+            [FromServices] IFactoriesManager? factoriesManager = null)
+        {
+            if (file is null)
+            {
+                return BadRequest("Log file is missing.");
+            }
+
+            if (file.Length <= 0)
+            {
+                return BadRequest("Uploaded log file is empty.");
+            }
+
+            if (file.Length > MaxUploadedLogFileSizeInBytes)
+            {
+                return StatusCode(
+                    StatusCodes.Status413PayloadTooLarge,
+                    $"Uploaded log file is too large. Maximum supported size is {MaxUploadedLogFileSizeInBytes / (1024 * 1024)} MB.");
+            }
+
+            // Offline providers currently parse from a file path, so uploads are staged to a temp file before parsing.
+            var tempDirectory = Directory.CreateTempSubdirectory();
+            try
+            {
+                var safeFileName = Path.GetFileName(file.FileName);
+                if (string.IsNullOrWhiteSpace(safeFileName))
+                {
+                    safeFileName = "uploaded.log";
+                }
+
+                var tempFilePath = Path.Combine(tempDirectory.FullName, $"{Guid.CreateVersion7()}_{safeFileName}");
+                await using (var uploadedFileStream = file.OpenReadStream())
+                await using (var outputStream = System.IO.File.Create(tempFilePath))
+                {
+                    await uploadedFileStream.CopyToAsync(outputStream, HttpContext.RequestAborted);
+                }
+
+                return await ProcessLogFile(tempFilePath, dataProviderId, factoriesManager);
+            }
+            finally
+            {
+                TryDeleteDirectory(tempDirectory);
+            }
+        }
+
+        private async Task<ActionResult<List<IAnalogyLogMessage>>> ProcessLogFile(
+            string filePath,
+            Guid? dataProviderId,
+            IFactoriesManager? factoriesManager)
+        {
             if (dataProviderId is null || dataProviderId == Guid.Empty)
             {
                 return BadRequest("A valid data provider id is required.");
@@ -121,6 +188,18 @@ namespace Analogy.LogViewer.Server.Controllers
             catch (Exception e)
             {
                 return BadRequest($"Error reading file {filePath}:{e.Message}");
+            }
+        }
+
+        private static void TryDeleteDirectory(DirectoryInfo directory)
+        {
+            try
+            {
+                directory.Delete(recursive: true);
+            }
+            catch
+            {
+                // Temp directory cleanup should not fail the request after parsing has completed.
             }
         }
     }

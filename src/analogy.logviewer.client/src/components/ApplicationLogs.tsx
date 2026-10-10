@@ -6,6 +6,7 @@ import { ecsLogger } from "../services/ecsLogger";
 
 const DEFAULT_LOG_PATH = "C:\\MVD2\\Logs\\ECS\\";
 const FILE_PATH_STORAGE_KEY = "appLogs_filePath";
+const MAX_LOG_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
 
 type Props = {
     onBack: () => void;
@@ -17,6 +18,20 @@ type Props = {
 
 type SortKey = "date" | "processId" | "text" | "level" | "module" | "source" | "user" | "threadId" | "machineName" | "rawText" | "lineNumber";
 type SortDir = "asc" | "desc";
+
+function formatFileSize(bytes: number): string {
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+
+    const kb = bytes / 1024;
+    if (kb < 1024) {
+        return `${kb.toFixed(1)} KB`;
+    }
+
+    const mb = kb / 1024;
+    return `${mb.toFixed(1)} MB`;
+}
 
 const COLUMNS: { key: SortKey; label: string; width: number; mono?: boolean }[] = [
     { key: "date",        label: "Date",          width: 172 },
@@ -375,6 +390,8 @@ interface LogTab {
     id: string;
     label: string;
     filePath: string;
+    source: "path" | "upload";
+    uploadedFile: File | null;
     providerId: string;
     providerTitle: string;
     factoryTitle: string;
@@ -391,6 +408,7 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
             return DEFAULT_LOG_PATH;
         }
     });
+    const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
     const [tabs, setTabs] = useState<LogTab[]>([]);
     const [activeTabId, setActiveTabId] = useState<string | null>(null);
     const tabCounterRef = useRef(0);
@@ -448,12 +466,13 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
 
     const handleFilePicked = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (!file) return;
-        const lastSep = Math.max(filePath.lastIndexOf("\\"), filePath.lastIndexOf("/"));
-        const dir = lastSep >= 0 ? filePath.slice(0, lastSep + 1) : DEFAULT_LOG_PATH;
-        const newPath = dir + file.name;
-        setFilePath(newPath);
-        void loadLogs(newPath);
+        if (!file) {
+            return;
+        }
+
+        setSelectedUploadFile(file);
+        setFilePath(file.name);
+        void loadLogs(file.name, file);
         e.target.value = "";
     };
 
@@ -477,6 +496,8 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
                 id: realtimeTabId,
                 label: `Realtime stream (${selectedProviderTitle || selectedProviderId})`,
                 filePath: "",
+                source: "path",
+                uploadedFile: null,
                 providerId: selectedProviderId,
                 providerTitle: selectedProviderTitle,
                 factoryTitle: selectedFactoryTitle,
@@ -545,21 +566,27 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
         };
     }, [isRealtimeProvider, selectedProviderId, selectedProviderTitle, selectedFactoryTitle]);
 
-    const loadLogs = async (pathOverride?: string) => {
+    const loadLogs = async (pathOverride?: string, uploadFileOverride: File | null = null) => {
         if (isRealtimeProvider) {
             setLoadError("Selected provider is realtime. File loading is disabled.");
             return;
         }
 
         const path = (pathOverride ?? filePath).trim();
-        if (!path) {
-            setLoadError("Enter a file path first.");
+        const uploadFile = uploadFileOverride ?? selectedUploadFile;
+        if (uploadFile === null && !path) {
+            setLoadError("Enter a file path first or pick a file.");
             return;
         }
         if (!selectedProviderId) {
             setLoadError("Select a data provider from the main page first.");
             return;
         }
+        if (uploadFile !== null && uploadFile.size > MAX_LOG_UPLOAD_SIZE_BYTES) {
+            setLoadError(`File is too large (${formatFileSize(uploadFile.size)}). Maximum upload size is ${formatFileSize(MAX_LOG_UPLOAD_SIZE_BYTES)}.`);
+            return;
+        }
+
         setLoadError("");
         setLoading(true);
         if (clearOldTabs) {
@@ -568,10 +595,14 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
         }
         tabCounterRef.current += 1;
         const newId = `tab-${tabCounterRef.current}-${Date.now()}`;
+        const tabPath = uploadFile?.name ?? path;
+        const tabSource = uploadFile !== null ? "upload" : "path";
         const newTab: LogTab = {
             id: newId,
             label: `Offline log #${tabCounterRef.current} (${selectedProviderTitle || selectedProviderId})`,
-            filePath: path,
+            filePath: tabPath,
+            source: tabSource,
+            uploadedFile: uploadFile,
             providerId: selectedProviderId,
             providerTitle: selectedProviderTitle,
             factoryTitle: selectedFactoryTitle,
@@ -583,8 +614,17 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
         setActiveTabId(newId);
         setSelectedIdx(null);
         try {
-            const params = new URLSearchParams({ filePath: path, dataProviderId: selectedProviderId });
-            const res = await fetch(`/api/Logging/GetLog?${params.toString()}`, { method: "GET" });
+            let res: Response;
+            if (uploadFile !== null) {
+                const formData = new FormData();
+                formData.append("file", uploadFile, uploadFile.name);
+                formData.append("dataProviderId", selectedProviderId);
+                res = await fetch("/api/Logging/GetLogFromUpload", { method: "POST", body: formData });
+            } else {
+                const params = new URLSearchParams({ filePath: path, dataProviderId: selectedProviderId });
+                res = await fetch(`/api/Logging/GetLog?${params.toString()}`, { method: "GET" });
+            }
+
             if (!res.ok) {
                 const text = await res.text().catch(() => "");
                 const msg = `${res.status} ${res.statusText}${text ? ` — ${text}` : ""}`;
@@ -650,10 +690,20 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
         setLoading(true);
         const tabId = activeTab.id;
         const tabPath = activeTab.filePath;
+        const tabUploadFile = activeTab.uploadedFile;
         const providerId = activeTab.providerId;
         try {
-            const params = new URLSearchParams({ filePath: tabPath, dataProviderId: providerId });
-            const res = await fetch(`/api/Logging/GetLog?${params.toString()}`, { method: "GET" });
+            let res: Response;
+            if (tabUploadFile !== null) {
+                const formData = new FormData();
+                formData.append("file", tabUploadFile, tabUploadFile.name);
+                formData.append("dataProviderId", providerId);
+                res = await fetch("/api/Logging/GetLogFromUpload", { method: "POST", body: formData });
+            } else {
+                const params = new URLSearchParams({ filePath: tabPath, dataProviderId: providerId });
+                res = await fetch(`/api/Logging/GetLog?${params.toString()}`, { method: "GET" });
+            }
+
             if (!res.ok) {
                 const text = await res.text().catch(() => "");
                 const msg = `${res.status} ${res.statusText}${text ? ` — ${text}` : ""}`;
@@ -881,7 +931,10 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
                             fontFamily: "monospace",
                         }}
                         value={filePath}
-                        onChange={e => setFilePath(e.target.value)}
+                        onChange={e => {
+                            setFilePath(e.target.value);
+                            setSelectedUploadFile(null);
+                        }}
                         onKeyDown={e => { if (e.key === "Enter") void loadLogs(); }}
                         placeholder="C:\MVD2\Logs\ECS\MediaManager_*.log"
                         spellCheck={false}
@@ -1347,7 +1400,7 @@ export function ApplicationLogs({ onBack, selectedFactoryTitle, selectedProvider
                     msg={sorted[detailIdx]}
                     index={detailIdx}
                     total={sorted.length}
-                    logFilePath={filePath}
+                    logFilePath={activeTab?.filePath ?? filePath}
                     onClose={() => setDetailIdx(null)}
                     onPrev={() => setDetailIdx(i => i !== null ? Math.max(0, i - 1) : 0)}
                     onNext={() => setDetailIdx(i => i !== null ? Math.min(sorted.length - 1, i + 1) : 0)}
